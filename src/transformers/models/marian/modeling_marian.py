@@ -486,6 +486,7 @@ class MarianPreTrainedModel(PreTrainedModel):
     config_class = MarianConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
+    _no_split_modules = ["MarianDecoderLayer", "MarianAttention"]
 
     def _init_weights(self, module: Union[nn.Linear, nn.Embedding, MarianSinusoidalPositionalEmbedding]):
         std = self.config.init_std
@@ -669,10 +670,11 @@ class MarianEncoder(MarianPreTrainedModel):
         self.max_source_positions = config.max_position_embeddings
         self.embed_scale = math.sqrt(embed_dim) if config.scale_embedding else 1.0
 
+        self.embed_tokens = nn.Embedding(config.vocab_size, embed_dim, self.padding_idx)
+        
         if embed_tokens is not None:
-            self.embed_tokens = embed_tokens
-        else:
-            self.embed_tokens = nn.Embedding(config.vocab_size, embed_dim, self.padding_idx)
+            self.embed_tokens.weight = embed_tokens.weight
+        
 
         self.embed_positions = MarianSinusoidalPositionalEmbedding(
             config.max_position_embeddings, embed_dim, self.padding_idx
@@ -758,7 +760,7 @@ class MarianEncoder(MarianPreTrainedModel):
 
         embed_pos = self.embed_positions(input_shape)
 
-        hidden_states = inputs_embeds + embed_pos
+        hidden_states = inputs_embeds + embed_pos.to(inputs_embeds.device)
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
 
         # expand attention_mask
@@ -841,10 +843,12 @@ class MarianDecoder(MarianPreTrainedModel):
         self.max_target_positions = config.max_position_embeddings
         self.embed_scale = math.sqrt(config.d_model) if config.scale_embedding else 1.0
 
+        self.embed_tokens = nn.Embedding(config.decoder_vocab_size, config.d_model, self.padding_idx)
+        
         if embed_tokens is not None:
-            self.embed_tokens = embed_tokens
-        else:
-            self.embed_tokens = nn.Embedding(config.decoder_vocab_size, config.d_model, self.padding_idx)
+            self.embed_tokens.weight = embed_tokens.weight
+       
+            
 
         self.embed_positions = MarianSinusoidalPositionalEmbedding(
             config.max_position_embeddings, config.d_model, self.padding_idx
@@ -1001,7 +1005,7 @@ class MarianDecoder(MarianPreTrainedModel):
         # embed positions
         positions = self.embed_positions(input_shape, past_key_values_length)
 
-        hidden_states = inputs_embeds + positions
+        hidden_states = inputs_embeds + positions.to(inputs_embeds.device)
 
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
 
@@ -1105,6 +1109,8 @@ class MarianDecoder(MarianPreTrainedModel):
 )
 class MarianModel(MarianPreTrainedModel):
     _tied_weights_keys = ["encoder.embed_tokens.weight", "decoder.embed_tokens.weight"]
+    
+    
 
     def __init__(self, config: MarianConfig):
         super().__init__(config)
